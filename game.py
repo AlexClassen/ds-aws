@@ -53,7 +53,8 @@ def start_game(args):
 
     while not is_game_won and not is_draw:
         total_moves += 1
-        AI_move, minimax_value = move.minimax(board, DEPTH, True, turn)
+        depthOfCurrentPlayer = args.player1Depth if turn == AI_1 else args.player2Depth
+        AI_move, minimax_value = move.minimax(board, depthOfCurrentPlayer, True, turn)
         place_piece(board, turn, AI_move)
         is_game_won = detect_win(board, turn)
         is_draw = board_full(board)
@@ -76,6 +77,8 @@ def main():
     parser = argparse.ArgumentParser(description='connect_four')
     parser.add_argument('--player1', type=str, required=False, default='Player 1', help='name of player 1')
     parser.add_argument('--player2', type=str, required=False, default='Player 2', help='name of player 2')
+    parser.add_argument('--player1Depth', type=int, required=False, default=4, help='depth of player 1')
+    parser.add_argument('--player2Depth', type=int, required=False, default=4, help='depth of player 2')
     args = parser.parse_args()
 
     start_game(args)
