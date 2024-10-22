@@ -3,8 +3,10 @@
 import argparse
 import numpy as np
 import random
-import move
+#import move
 from common import *
+import boto3
+import json
 
 def create_board():
     return np.zeros((ROWS, COLUMNS), np.int8)
@@ -53,17 +55,30 @@ def start_game(args):
 
     while not is_game_won and not is_draw:
         total_moves += 1
+
+        # Determine the depth for the current AI
         depthOfCurrentPlayer = args.player1Depth if turn == AI_1 else args.player2Depth
-        AI_move, minimax_value = move.minimax(board, depthOfCurrentPlayer, True, turn)
+
+        # Get the best move from the Lambda function
+        AI_move, minimax_value = get_move_from_lambda(board, turn, depthOfCurrentPlayer)
+
+        # Place the piece on the board
         place_piece(board, turn, AI_move)
+
+        # Check if the game is won or drawn
         is_game_won = detect_win(board, turn)
         is_draw = board_full(board)
+
+        # Switch turns
         turn = AI_1 if turn == AI_2 else AI_2
+
+        # Draw the game state on the screen
         if is_game_won:
             draw_game(board, turn, game_over=True, args=args)
             break
         else:
             draw_game(board, turn, args=args)
+
 
     winner = args.player1 if turn == AI_2 else args.player2
     if is_draw:
@@ -71,6 +86,34 @@ def start_game(args):
         winner = args.player1 if random.choice([AI_1, AI_2]) == AI_1 else args.player2
     print(f"Winner: {winner}.")
     print("Total number of moves: %s" % total_moves)
+
+    # Create a Lambda client
+lambda_client = boto3.client('lambda', region_name='us-east-1')
+
+def get_move_from_lambda(board, player, depth):
+
+    board_list = board.tolist()
+
+    # Prepare the payload
+    payload = {
+        "board": board_list,
+        "player": player,
+        "depth": depth
+    }
+
+    # Invoke the Lambda function
+    response = lambda_client.invoke(
+        FunctionName='game-move-function',
+        InvocationType='RequestResponse',
+        Payload=json.dumps(payload)
+    )
+
+    # Parse the Lambda response
+    response_payload = json.loads(response['Payload'].read())
+
+    result = response_payload['body']
+
+    return result['column'], result['score']
 
 def main():
     # Parse parameters
