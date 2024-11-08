@@ -3,7 +3,6 @@
 import argparse
 import numpy as np
 import random
-#import move
 from common import *
 import boto3
 import json
