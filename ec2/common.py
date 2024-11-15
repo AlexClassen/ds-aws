@@ -12,6 +12,27 @@ def place_piece(board, player, column):
         if board[row][index] == EMPTY:
             board[row][index] = player
             return
+        
+def draw_game(board, turn, game_over=False, args=None):
+    print("                     ╔═════════════════╗")
+    for row in board:
+        line = "\033[4;30;47m|\033[0m"
+        for col, piece in enumerate(row):
+            if piece == AI_2:
+                line += "\033[4;34;47m●\033[0m"
+            elif piece == AI_1:
+                line += "\033[4;31;47m●\033[0m"
+            else:
+                line += "\033[4;30;47m \033[0m"
+            line += "\033[4;30;47m|\033[0m"
+        print("                     ║ " + line + " ║")
+    print("                     ║  1 2 3 4 5 6 7  ║")
+    print("                     ╚═════════════════╝\n")
+    if not game_over:
+        if turn == AI_1:
+            print(f"Waiting for {args.player1} to make a move...")
+        else:
+            print(f"Waiting for {args.player2} to make a move...")
 
 # Checks if the player won the given board
 def detect_win(board, player):

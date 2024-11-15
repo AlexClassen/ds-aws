@@ -1,11 +1,16 @@
-# This code was inspired by the project found at:
-# https://github.com/bryanjsanchez/Parallel-Connect-Four
 import argparse
 import numpy as np
 import random
 from common import *
 import boto3
 import json
+import asyncio
+import nats
+
+import sys
+sys.stdout.reconfigure(line_buffering=True)
+
+lambda_client = boto3.client('lambda', region_name='us-east-1')
 
 def create_board():
     return np.zeros((ROWS, COLUMNS), np.int8)
@@ -17,35 +22,16 @@ def draw_title():
     print("| |__| (_) | | | | | | |  __/ (__| |_  |  _| (_) | |_| | |   ")
     print(" \____\___/|_| |_|_| |_|\___|\___|\__| |_|  \___/ \__,_|_|\n")
 
-def draw_game(board, turn, game_over=False, args=None):
-    print("                     ╔═════════════════╗")
-    for row in board:
-        line = "\033[4;30;47m|\033[0m"
-        for col, piece in enumerate(row):
-            if piece == AI_2:
-                line += "\033[4;34;47m●\033[0m"
-            elif piece == AI_1:
-                line += "\033[4;31;47m●\033[0m"
-            else:
-                line += "\033[4;30;47m \033[0m"
-            line += "\033[4;30;47m|\033[0m"
-        print("                     ║ " + line + " ║")
-    print("                     ║  1 2 3 4 5 6 7  ║")
-    print("                     ╚═════════════════╝\n")
-    if not game_over:
-        if turn == AI_1:
-            print(f"Waiting for {args.player1}...")
-        else:
-            print(f"Waiting for {args.player2}...")
-
 def start_game(args):
+    print("Initializing new game...")
     board = create_board()
     turn = random.choice([AI_1, AI_2])
     is_game_won = False
     draw_title()
     draw_game(board, turn, args=args)
+    print(f"Game started. First move by: {'AI_1' if turn == AI_1 else 'AI_2'}")
 
-    # Do a random move
+    # Initial random move
     place_piece(board, turn, random.choice([i for i in range(1, COLUMNS + 1)]))
     turn = AI_1 if turn == AI_2 else AI_2
     draw_game(board, turn, args=args)
@@ -54,68 +40,73 @@ def start_game(args):
 
     while not is_game_won and not is_draw:
         total_moves += 1
-
-        # Determine the depth for the current AI
         depthOfCurrentPlayer = args.player1Depth if turn == AI_1 else args.player2Depth
-
-        # Get the best move from the Lambda function
+        print(f"Calculating move for {'AI_1' if turn == AI_1 else 'AI_2'} with depth {depthOfCurrentPlayer}...")
         AI_move, minimax_value = get_move_from_lambda(board, turn, depthOfCurrentPlayer)
-
-        # Place the piece on the board
         place_piece(board, turn, AI_move)
-
-        # Check if the game is won or drawn
         is_game_won = detect_win(board, turn)
         is_draw = board_full(board)
-
-        # Switch turns
         turn = AI_1 if turn == AI_2 else AI_2
 
-        # Draw the game state on the screen
         if is_game_won:
+            print("Game won! Displaying final board...")
             draw_game(board, turn, game_over=True, args=args)
             break
         else:
             draw_game(board, turn, args=args)
 
-
     winner = args.player1 if turn == AI_2 else args.player2
     if is_draw:
-        print("Draw! Randomly selecting winner.")
+        print("The game is a draw. Randomly selecting a winner.")
         winner = args.player1 if random.choice([AI_1, AI_2]) == AI_1 else args.player2
-    print(f"Winner: {winner}.")
-    print("Total number of moves: %s" % total_moves)
+    print(f"Winner: {winner}. Total number of moves: {total_moves}")
 
-    # Create a Lambda client
-lambda_client = boto3.client('lambda', region_name='us-east-1')
+    return {
+        "winner": winner,
+        "board": board.tolist(),
+        "total_moves": total_moves
+    }
 
 def get_move_from_lambda(board, player, depth):
-
+    print("Requesting move from Lambda function...")
     board_list = board.tolist()
-
-    # Prepare the payload
     payload = {
         "board": board_list,
         "player": player,
         "depth": depth
     }
-
-    # Invoke the Lambda function
     response = lambda_client.invoke(
         FunctionName='game-move-function',
         InvocationType='RequestResponse',
         Payload=json.dumps(payload)
     )
-
-    # Parse the Lambda response
     response_payload = json.loads(response['Payload'].read())
-
     result = response_payload['body']
-
+    print(f"Received move: {result['column']} with score {result['score']}")
     return result['column'], result['score']
 
-def main():
-    # Parse parameters
+# Async function to handle game events with NATS
+async def run_game_with_nats(args):
+    print("Connecting to NATS server at nats://nats-server:4222...")
+    nc = await nats.connect("nats://nats-server:4222")
+    print("Connected to NATS server.")
+
+    async def e_start_handler(msg):
+        print("Received e_start event in game. Starting game...")
+        result = start_game(args)
+        print("Game completed. Publishing e_end event...")
+        await nc.publish("e_end", json.dumps(result).encode())
+        print("Published e_end event.")
+
+    # Subscribe to the e_start event
+    print("Subscribing to e_start event...")
+    await nc.subscribe("e_start", cb=e_start_handler)
+    print("Subscription to e_start event successful.")
+
+    while True:
+        await asyncio.sleep(1)
+
+async def main():
     parser = argparse.ArgumentParser(description='connect_four')
     parser.add_argument('--player1', type=str, required=False, default='Player 1', help='name of player 1')
     parser.add_argument('--player2', type=str, required=False, default='Player 2', help='name of player 2')
@@ -123,7 +114,9 @@ def main():
     parser.add_argument('--player2Depth', type=int, required=False, default=4, help='depth of player 2')
     args = parser.parse_args()
 
-    start_game(args)
+    await run_game_with_nats(args)
 
 if __name__ == "__main__":
-    main()
+    print("Launching game manager...")
+    asyncio.run(main())
+    print("Game manager terminated.")

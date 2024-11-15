@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  nats-server:
+    image: nats
+    container_name: nats-server
+    ports:
+      - "4222:4222"
+    networks:
+      - app-network
+    command: ["-js"]
+
+  connect-four-game:
+    image: 381561213897.dkr.ecr.us-east-1.amazonaws.com/connect-four-game:latest
+    pull_policy: always
+    container_name: connect-four-game
+    environment:
+      - PLAYER1=AI_1
+      - PLAYER2=AI_2
+      - PLAYER1_DEPTH=4
+      - PLAYER2_DEPTH=4
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+    networks:
+      - app-network
+
+  connect-four-manager:
+    image: 381561213897.dkr.ecr.us-east-1.amazonaws.com/connect-four-manager:latest
+    pull_policy: always
+    container_name: connect-four-manager
+    environment:
+      - NATS_URL=nats://nats-server:4222
+    depends_on:
+      - nats-server
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
