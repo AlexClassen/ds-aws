@@ -6,6 +6,7 @@ import boto3
 import json
 import asyncio
 import nats
+from nats.js.api import KeyValueConfig
 
 import sys
 sys.stdout.reconfigure(line_buffering=True)
@@ -18,9 +19,9 @@ def create_board():
 def draw_title():
     print("  ____                            _     _____                ")
     print(" / ___|___  _ __  _ __   ___  ___| |_  |  ___|__  _   _ _ __ ")
-    print("| |   / _ \| '_ \| '_ \ / _ \/ __| __| | |_ / _ \| | | | '__|")
+    print("| |   / _ \\| '_ \\| '_ \\ / _ \\/ __| __| | |_ / _ \\| | | | '__|")
     print("| |__| (_) | | | | | | |  __/ (__| |_  |  _| (_) | |_| | |   ")
-    print(" \____\___/|_| |_|_| |_|\___|\___|\__| |_|  \___/ \__,_|_|\n")
+    print(" \\____\\___/|_| |_|_| |_|\\___|\\___|\\__| |_|  \\___/ \\__,_|_|\\n")
 
 def start_game(args):
     print("Initializing new game...")
@@ -85,16 +86,25 @@ def get_move_from_lambda(board, player, depth):
     print(f"Received move: {result['column']} with score {result['score']}")
     return result['column'], result['score']
 
-# Async function to handle game events with NATS
 async def run_game_with_nats(args):
     print("Connecting to NATS server at nats://nats-server:4222...")
     nc = await nats.connect("nats://nats-server:4222")
     print("Connected to NATS server.")
 
+    # Set up JetStream for KV storage
+    js = nc.jetstream()
+    kv = await js.create_key_value(KeyValueConfig(bucket="game_results"))
+
     async def e_start_handler(msg):
         print("Received e_start event in game. Starting game...")
         result = start_game(args)
-        print("Game completed. Publishing e_end event...")
+
+        # Store the game result in KV store with the key 'latest_game'
+        await kv.put("latest_game", json.dumps(result).encode())
+        print("Stored game result in KV store under key 'latest_game'")
+
+        # Publish result to e_end topic
+        print("Publishing e_end event with game result...")
         await nc.publish("e_end", json.dumps(result).encode())
         print("Published e_end event.")
 
